@@ -1,0 +1,501 @@
+import random
+
+# Constants for game board size and number of pieces
+BOARD_SIZE = 24
+NUM_PIECES = 15
+
+class Player(object):
+    """description of class"""
+    # set player's name and which turn they are taking (i.e player one or player two)
+    def __init__(self, name, team):
+        self.name = name
+        self.bar = 0
+        self.goal = 0
+        self.team = team
+
+    def get_home(self):
+        if self.team == 1:
+            return [0, 1, 2, 3, 4, 5, 6]
+        else:
+           return [0, 24, 23, 22, 21, 20, 19]
+
+# Point object to represent each point on the board, 24 points are stored in an array, so they can be indexed, index represents their position on the board, each point has two attributes, team to correspond to player one (1) or player two (-1) and count which represents the number of pieces on that point 
+class Point(object):
+    def __init__(self, team, count):
+        self.team = team
+        self.count = count
+
+    # fxn to reset the point 
+    def reset(self):
+        self.team = 0
+        self.count = 0
+
+    # fxn to remove piece from point 
+    def remove_piece(self):
+        self.count -= 1
+        if self.count == 0:
+            self.team = 0
+
+    # fxn to add piece to point 
+    def add_piece(self, team):
+        self.count += 1
+        if self.count == 1:
+            self.team = team
+
+class Controller(object):
+    """description of class"""
+    # initialize current player to player 1, opponent to player 2, empty move, empty message, empty dice, empty board, call new game fxn 
+    def __init__(self):
+        self._mode = 0
+        self._currentPlayer = None
+        self._opponent = None
+        self._move = [0, 0]
+        self._message = ''
+        self._dice = []
+        self._board = []
+        self.new_game()
+
+    # new game fxn, fills board with empty point objects 
+    def new_game(self):
+        self._board = [Point(0, 0) for i in range(25)]
+
+        # assigns starting points with their team and count 
+        self._board[0] = None
+        self._board[1] = Point(-1, 2)
+        self._board[12] = Point(-1, 5)
+        self._board[17] = Point(-1, 3)
+        self._board[19] = Point(-1, 5)
+
+        self._board[24] = Point(1, 2)
+        self._board[13] = Point(1, 5)
+        self._board[8] = Point(1, 3)
+        self._board[6] = Point(1, 5)
+
+        # display game information 
+        print('Welcome to the wonderful game of Backgammon!\n1. from = 0 to move from bar\n2. to = 25 to bear off\n3. from = -2 to swap dice\n')
+
+        # get gamemode
+        while self._mode < 1 or self._mode > 2:
+            try:
+                self._mode = int(input('Please select gamemode:\n1. Two player\n2. One player\n'))
+            except ValueError:
+                print("Please enter a number 1 or 2")
+
+        # create players
+        if self._mode == 1:
+            pOneName = input("Enter the name of white: ")
+            pTwoName = input("Enter the name of black: ")
+            pOne = Player(pOneName, 1)
+            pTwo = Player(pTwoName, -1)
+        # otherwise it is one player, bot always plays black
+        else:
+            pOneName = input("Enter the name of white: ")
+            pOne = Player(pOneName, 1)
+            pTwo = Player('Salami Bot', -1)
+
+        # get who moves first
+        self.roll_dice()
+        if self._dice[0] >= self._dice[1]:
+            print("White moves first.\n")
+            self._currentPlayer = pOne
+            self._opponent = pTwo
+        else:
+            print("Black moves first.\n")
+            self._currentPlayer = pTwo
+            self._opponent = pOne
+        self._dice.clear()
+
+    # dice functions 
+    # Roll dice function, adds two more dice of the same value if doubles are rolled
+    def roll_dice(self):
+        self._dice.append(random.randint(1,6))
+        self._dice.append(random.randint(1,6))
+        if self._dice[0] == self._dice[1]:
+            self._dice.append(self._dice[0])
+            self._dice.append(self._dice[0])
+
+    # Swap function, swaps dice for player
+    def swap_dice(self):
+        if len(self._dice) > 2 or len(self._dice) == 1:
+            return
+        temp = self._dice[1]
+        self._dice[1] = self._dice[0]
+        self._dice[0] = temp
+
+    # game controller functions 
+    # updates dice with player's move 
+    def isGameOver(self):
+        return self._currentPlayer.goal == NUM_PIECES or self._opponent.goal == NUM_PIECES
+
+    def getWinner(self):
+        if self._currentPlayer == NUM_PIECES:
+            return self._currentPlayer.name
+        else:
+            return self._opponent.name
+
+    def update_move(self, fromPoint, toPoint):
+        self._move[0] = fromPoint
+        self._move[1] = toPoint
+
+    # switch players after turn is over 
+    def switch_players(self):
+        temp = self._currentPlayer
+        self._currentPlayer = self._opponent
+        self._opponent = temp
+
+    def print_board(self):
+        print('========================================================================')
+
+        # show current dice
+        id = 1
+        for d in self._dice:
+            print('Dice ' + str(id) + ': ' + str(d))
+            id += 1
+
+        topBoard = ''
+        bottomBoard = ''
+        count = 0
+
+        for index in range(13, BOARD_SIZE + 1):
+            if count == 6:
+                topBoard += '| | '
+                bottomBoard += '| | '
+            topBoard += '( ' + str(self._board[index].count * self._board[index].team) + ') '
+            bottomBoard += '( ' + str(self._board[25 - index].count * self._board[25 - index].team) + ') '
+            count += 1
+
+        print('\n' + topBoard + '\n')
+        print(bottomBoard + '\n')
+        print('Your bar: ' + str(self._currentPlayer.bar))
+        print('Opponent\'s bar: ' + str(self._opponent.bar))
+
+        if self._currentPlayer.goal or self._opponent.goal:
+            print('Your goal: ' + str(self._currentPlayer.goal))
+            print('Opponent\'s goal: ' + str(self._opponent.goal))
+        print('===========================================================================')
+
+    # returns if the player can bear off 
+    def can_bear_off(self):
+        if self._currentPlayer.goal:
+            return True
+        total = 0
+        for i in self._currentPlayer.get_home():
+            if i == 0:
+                continue
+            if self._board[i].team == self._currentPlayer.team:
+                total += self._board[i].count
+        return total == NUM_PIECES
+
+    # returns if the player hit on their move 
+    def check_hit(self):
+        if self._board[self._move[1]].team == self._opponent.team and self._board[self._move[1]].count == 1:
+            return True
+
+    def check_move(self):
+        # if the player has barred pieces but didn't try to move them 
+        if self._move[0] != 0 and self._currentPlayer.bar:
+            self._message = ' has at least one barred piece'
+            return False 
+
+        # if the player doesn't have barred pieces but tried to move them 
+        if self._move[0] == 0 and not self._currentPlayer.bar:
+            self._message = ' does not have any barred pieces'
+            return False
+
+        # if the player is trying to bear off but can't
+        if self._move[1] == 25 and not self.can_bear_off():
+            self._message = ' cannot bear off'
+            return False
+
+        # final check to move from bar
+        if self._move[0] == 0:
+            # have to check the position they are moving to is not occupied
+                # by the opponent 
+            # have to check the dice rolled allow that move 
+            if self._board[self._move[1]].team == self._opponent.team and self._board[self._move[1]].count > 1:
+                self._message = ' cannot move from bar to point ' + str(self._move[1]) + ' there are too many opponent piece there'
+                return False
+            elif self._move[1] not in self._opponent.get_home() or self._opponent.get_home().index(self._move[1]) != self._dice[0]:
+                self._message = ' cannot move from bar to point ' + str(self._move[1]) + ' with dice'
+                return False
+            else:
+                return True
+            
+        # final check to bear off 
+        if self._move[1] == 25:
+            # if the player does not have pieces at from point 
+            if self._board[self._move[0]].team != self._currentPlayer.team:
+                self._message = ' cannot bear off, does not have any pieces at point ' + str(self._move[0])
+                return False
+            # if the dice does not allow it 
+            elif self._currentPlayer.get_home().index(self._move[0]) > self._dice[0]:
+                self._message = ' cannot bear off, piece is too far from home'
+                return False
+            # if the dice allows it, but there are pieces in higher positions still
+            elif self._currentPlayer.get_home().index(self._move[0]) < self._dice[0]:
+                for otherFromPoint in reversed(self._currentPlayer.get_home()):
+                    if self._move[0] == otherFromPoint:
+                        return True
+                    if self._board[otherFromPoint].team == self._currentPlayer.team:
+                        self._message = ' cannot bear off, there are pieces in higher positions'
+                        return False
+            # else player can bear off
+            else:
+                return True
+        # check for player making a regular move 
+        # check the player has a piece at from point, the player is not moving backwards and the dice rolled allow move, and there isn't more than one opponent piece at the to point
+        if self._board[self._move[0]].team != self._currentPlayer.team:
+            self._message = ' cannot move from point ' + str(self._move[0]) + ' to point ' + str(self._move[1]) + ' you have no pieces there'
+            return False
+        elif self._move[0] - self._move[1] != self._dice[0] * self._currentPlayer.team:
+            self._message = ' cannot move from point ' + str(self._move[0]) + ' to point ' + str(self._move[1]) + ' using dice one'
+            return False
+        elif self._board[self._move[1]].team == self._opponent.team and self._board[self._move[1]].count > 1:
+            self._message = ' cannot move from point ' + str(self._move[0]) + ' to point ' + str(self._move[1]) + ', there are too many opponent pieces there'
+            return False
+        else:
+            return True
+
+    def make_move(self):
+        self._message = ''
+        # if the player is bearing off there is no hit, make move
+        if self._move[1] == 25:
+            self._currentPlayer.goal += 1
+            self._board[self._move[0]].remove_piece()
+            self._message = ' beared off from point ' + str(self._move[0])
+            return 
+
+        # if the player is moving from bar or making a normal move, first check for hit 
+        if self.check_hit():
+            self._board[self._move[1]].reset()
+            self._opponent.bar += 1
+            self._message = ' hit at point ' + str(self._move[1]) + ' and'
+
+        # make move if player is moving from bar 
+        if self._move[0] == 0:
+            self._currentPlayer.bar -= 1
+            self._board[self._move[1]].add_piece(self._currentPlayer.team)
+            self._message += ' moved from bar to point ' + str(self._move[1])
+            return 
+
+        # otherwise make regular move 
+        self._board[self._move[0]].remove_piece()
+        self._board[self._move[1]].add_piece(self._currentPlayer.team)
+        self._message += ' moved from point ' + str(self._move[0]) + ' to point ' + str(self._move[1])
+
+    # adjust dice based on available moves, does not return a value, but will clear the list of dice (moves) if there are no available moves, effectively ending the players turn 
+    def adjust_dice(self):
+        # check if the player has pieces on the bar 
+        if self._currentPlayer.bar:
+            # if the player has pieces on the bar, check if dice one allows player to move their piece from bar to position on board allowed by the dice 
+            opponent_home = self._opponent.get_home()
+            if self._board[opponent_home[self._dice[0]]].team == self._opponent.team and self._board[opponent_home[self._dice[0]]].count > 1:
+                # if there is only one dice or the dice is doubles
+                if len(self._dice) == 1 or len(self._dice) > 2:
+                    self._message = ' only has one move: ' + str(self._dice[0]) + ' this is not a valid move, voiding turn'
+                    self._dice.clear()
+                    return
+                # else if the player cannot move from the bar with their second dice
+                elif self._board[opponent_home[self._dice[1]]].team == self._opponent.team and self._board[opponent_home[self._dice[1]]].count > 1:
+                    self._message = ' has no valid moves, dice one: ' + str(self._dice[0]) + ' dice two: ' + str(self._dice[1])
+                    self._dice.clear()
+                    return
+                # else the player will have to use the second dice first 
+                else:
+                    self.swap_dice()
+                    return 
+            # else the player can move with their first dice 
+            else:
+                return
+
+        # check if the player has any valid moves on the board 
+        check = 1
+
+        # find all points current player can move from 
+        fromPoints = [index for index in range(1, BOARD_SIZE + 1) if self._board[index].team == self._currentPlayer.team]
+
+        while check:
+            # for each point in the list 
+            for point in fromPoints:
+                self.update_move(point, point - self._dice[0] * self._currentPlayer.team)
+                # if the move resulted in an option to bear off, check if bearing off is an option for the player, if it is return, this is a valid move 
+                if (self._move[1] <= 0 or self._move[1] >= 25) and self.can_bear_off():
+                    self._message = ''
+                    return
+                # if the move resulted in an option to bear off, but the player cannot bear off, continue looking for valid moves, this is not a valid move 
+                elif (self._move[1] <= 0 or self._move[1] >= 25) and not self.can_bear_off():
+                    continue
+                # else if the move is valid return
+                elif self.check_move():
+                    self._message = ''
+                    return
+
+            # if we didn't return there were no valid moves using dice one, if there is only one dice or they are doubles, void turn 
+            if len(self._dice) == 1 or len(self._dice) > 2 or self._dice[0] == self._dice[1]:
+                self._message = ' only has one move: ' + str(self._dice[0]) + ' this is not a valid move, voiding turn'
+                self._dice.clear()
+                return
+            else:
+                if check == 1:
+                    check += 1
+                    self.swap_dice()
+                else:
+                    self._message = ' has no valid moves, dice one: ' + str(self._dice[0]) + ' dice two: ' + str(self._dice[1])
+                    self._dice.clear()
+                    return
+
+    def runner(self):
+        # while the game is not over keep switching players 
+        while not self.isGameOver():
+
+            # roll the dice
+            self.roll_dice()
+
+            # adjust dice 
+            self.adjust_dice()
+
+            # while there is still a move available and the game is not over 
+            while len(self._dice) > 0 and not self.isGameOver():
+
+                # print the board
+                self.print_board()
+
+                # create variables for the player's move 
+                fromP = -5
+                toP = 0
+
+                # if it is two player mode or it is one player mode and the current player is not the bot 
+                if self._mode == 1 or self._mode == 2 and self._currentPlayer.team == 1:
+                    # while the player has entered values that are out of range prompt them for their move 
+                    while fromP < 0 or fromP > 24 or toP < 1 or toP > 25:
+                        print('from = -3 to view game information\n\n' + '> ' + self._currentPlayer.name + '\'s turn <')
+                        try:
+                            fromP = int(input('Enter the point you want to move from: '))
+                            toP = int(input('Enter the point you want to move to: '))
+                        except:
+                            print('\nPlease enter a valid integer\n')
+                        if fromP == -2:
+                            self.swap_dice()
+                            print('\nThe dice have been swapped, please enter your move:\nDice One: ' + str(self._dice[0]) + '\nDice Two: ' + str(self._dice[1]) + '\n\n')
+                        elif fromP == -3:
+                            print('1. from = 0 to move from bar\n2. to = 25 to bear off\n3. from = -2 to swap dice')
+
+                    # update dice
+                    self.update_move(fromP, toP)
+
+                    # check if the move is valid
+                    if self.check_move():
+                        # make move
+                        self.make_move()
+                        self._dice.pop(0)
+                        # display result of player's move, clear message 
+                        print('\n' + self._currentPlayer.name + self._message)
+                        self._message = ''
+                        if len(self._dice) != 0:
+                            self.adjust_dice()
+                    # if it's not display error message 
+                    else:
+                        # display result of player's move, clear message 
+                        print('\n' + self._currentPlayer.name + self._message)
+                        self._message = ''
+                # else it is one player and it is the bot's turn 
+                else:
+                    # ask for user to enter to continue playing 
+                    print('> Salami Bot\'s Turn <')
+                    input('Press enter to continue')
+
+                    # function will ultimately update current move for the bot 
+                    self.salami_bot()
+
+                    # make move 
+                    self.make_move()
+                    
+                    # remove dice used 
+                    self._dice.remove(abs(self._move[0] - self._move[1]))
+
+                    # display result of player's move, clear message 
+                    print('\n' + self._currentPlayer.name + self._message)
+                    self._message = ''
+                    if len(self._dice) != 0:
+                        self.adjust_dice()
+
+            # Display result of player's turn if adjustDice found there is no available moves for player 
+            if len(self._message) > 0:
+                print('\n' + self._currentPlayer.name + self._message)
+
+            # Switch players 
+            self.switch_players()
+
+        # When the game is over, print the board one last time
+        self.print_board()
+
+        # Display winner
+        print(self.getWinner() + ' is the winner!')
+
+    # functions for bot 
+    # function to run bot algorithm
+    def salami_bot(self):
+        # choosing which moves it optimal 
+        move = self.find_best_move()
+
+        # updating move, return 
+        self.update_move(move[0], move[1])
+        return 
+
+    # function to find all possible moves for current gamestate, can assume there is at least one valid move because adjust_dice() function is called after initial dice roll and after each move 
+    def get_all_moves(self):
+        all_moves = []
+        if self._currentPlayer.bar:
+            # adjust_dice() function is already checking dice to move from bar, we know the first dice is a valid move 
+            all_moves.append([0, self._dice[0]])
+
+            # check to see if there is another dice and if there is check if it is a valid move 
+            if len(self._dice) > 1 and self._dice[0] != self._dice[1]:
+                opponent_home = self._opponent.get_home()
+                if self._board[opponent_home[self._dice[1]]].team != self._opponent.team or self._board[opponent_home[self._dice[1]]].team == self._opponent.team and self._board[opponent_home[self._dice[1]]].count <= 1:
+                    all_moves.append([0, self._dice[1]])
+
+            return all_moves
+
+        # get all moves available on board 
+        fromPoints = [index for index in range(1, BOARD_SIZE + 1) if self._board[index].team == self._currentPlayer.team]
+        # for each point in the list 
+        for point in fromPoints:
+            toPoint = point - self._dice[0] * self._currentPlayer.team
+            self.update_move(point, toPoint)
+            # if the move resulted in an option to bear off, check if bearing off is an option for the player, if it is return, this is a valid move 
+            if (self._move[1] <= 0 or self._move[1] >= 25) and self.can_bear_off():
+                all_moves.append([point, 25])
+                continue
+            # if the move resulted in an option to bear off, but the player cannot bear off, continue looking for valid moves, this is not a valid move 
+            elif (self._move[1] <= 0 or self._move[1] >= 25) and not self.can_bear_off():
+                continue
+            # else if the move is valid return
+            elif self.check_move():
+                all_moves.append([point, toPoint])
+                continue
+
+        # clear message, return list of mvoes
+        self._message = ''
+        return all_moves
+
+    def find_best_move(self):
+        moves = self.get_all_moves()
+        #best_move = None
+        #best_score = -math.inf
+        #for move in moves:
+        #    score = evaluate_move(state, move)
+        #    if score > best_score:
+        #        best_move = move
+        #        best_score = score
+        #return best_move
+        move = random.randint(0, len(moves) - 1)
+        return moves[move]
+
+    def evaluate_move(self, move):
+        # how to score
+        return
+
+game = Controller()
+
+game.runner()
