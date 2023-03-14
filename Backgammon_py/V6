@@ -1,0 +1,1277 @@
+import random
+import pygame
+from time import sleep
+import sys
+import string
+import math 
+
+# Constants for game board size and number of pieces
+BOARD_SIZE = 24
+NUM_PIECES = 15
+
+# Probabilities of rolling the move value 
+point_distance_prob = {
+    1: 0.0278,
+    2: 0.3888,
+    3: 0.4444,
+    4: 0.4722,
+    5: 0.5277,
+    6: 0.5277,
+    7: 0.1666,
+    8: 0.2222,
+    9: 0.1388,
+    10: 0.0833,
+    11: 0.0555,
+    12: 0.0833,
+    15: 0.0278,
+    16: 0.0278,
+    18: 0.0278,
+    20: 0.0278,
+    24: 0.0278}
+
+# General functions 
+def has_punctuation(word):
+    for character in word:
+        if character in string.punctuation:
+            return True
+    return False
+# Define a text class that inherits from pygame.sprite.Sprite to display text on gameboard
+class gameText(pygame.sprite.Sprite):
+    def __init__(self, _text, coords, size, color = (0, 0, 0), bold = False):
+        super().__init__()
+        self.bold = bold
+        self.color = color
+        self.font = pygame.font.SysFont(None, size, self.bold)
+        self.text = self.font.render(str(_text), True, color)
+        self.image = self.text
+        self.rect = self.image.get_rect()
+        self.rect.x = coords[0]
+        self.rect.y = coords[1]
+
+# Define a Piece class that inherits from pygame.sprite.Sprite to represent pieces on board 
+class Piece(pygame.sprite.Sprite):
+    def __init__(self, team, coords):
+        super().__init__()
+        self.team = self.get_team(team)
+        self.image = pygame.image.load(self.team)
+        self.image = pygame.transform.scale(self.image, (70, 70))
+        self.rect = self.image.get_rect()
+        self.rect.x = coords[0]
+        self.rect.y = coords[1]
+
+    def get_team(self, team):
+        if team == 1:
+            return "whitePieceV2.png"
+        else:
+            return "blackPieceV2.png"
+
+class Player(object):
+    """description of class"""
+    # set player's name and which turn they are taking (i.e player one or player two)
+    def __init__(self, name, team):
+        self.name = name
+        self.bar = 0
+        self.goal = 0
+        self.team = team
+
+    def get_home(self):
+        if self.team == 1:
+            return [0, 1, 2, 3, 4, 5, 6]
+        else:
+           return [0, 24, 23, 22, 21, 20, 19]
+
+    def get_team(self):
+        if self.team == 1:
+            return "White"
+        else: 
+            return "Black"
+
+    def get_name(self):
+        return self.name
+
+# AI backgammon player
+class salami_bot(Player):
+    def __init__(self, name, team):
+        super().__init__(name, team)
+        # store the sequence of moves maximize_turn finds, the stack is empty at the beginning of the bot's turn, but stores all the moves for the bots subsequent turns, so maximize_turn is only called once each turn 
+        self.best_move_sequence = []
+
+    def turn(self, game):
+
+        # standard turn function for smart bot and default bot, just calls the find_best_move function which is different for each bot
+        move = self.find_best_move(game)
+
+        # adjust game dice and move 
+        game.update_move(move[0], move[1])
+        game.update_dice(move[2])
+
+    def find_best_move(self, game):
+        # call get risk function, find index with minimum risk, if there is more than one move with 0 risk, returns the first one 
+        #blotRisk = self.get_risk(game, moves)
+        #min_risk = min(blotRisk)
+        #min_index = blotRisk.index(min_risk)
+
+        # the maximize_turn function fills the move stack with the optimal sequence of moves for the bot's turn. It should only be called once, at the beginning of the bot's turn
+        # it should then pull the move from the stack and pass it to the controller 
+        if len(self.best_move_sequence) == 0:
+            # when the turn function is first called for the bot, moveStack has the bot's last move made in its previous turn and all the moves from the opponent's turn, so it has to be cleared 
+            # the bot's last move from its last turn is in the move stack because, although it is undone in the maximize turn function, it is added back to the stack when the move is committed to the board 
+            game.moveStack.clear()
+
+            # self.maximize_turn(game, depth), where depth is how many moves ahead the function is going to look, maximum is four (double dice), minumum is 1 (adjust dice sees there is only one available move), the function becomes too complex when trying to optimize for four moves ahead, so the maximum depth will be two moves, therefore, depth = len(dice) if the length of the dice is <= 2, otherwise it is 2
+            depth = len(game.dice) if len(game.dice) <= 2 else 2 
+
+            # call maximize_turn to fill move stack 
+            self.maximize_turn(game, depth)
+        #game.printBoard()
+        move = self.best_move_sequence.pop()
+        return move
+
+    # function to find all possible moves for current gamestate, can assume there is at least one valid move because adjust_dice() function is called after initial dice roll and after each move, right now the function does not load repeated moves  
+    def get_all_moves(self, game):
+
+        all_moves = []
+        # if the player has barred pieces don't check all From points, player can only move from bar 
+        if game.currentPlayer.bar:
+            opponent_home = game.opponent.get_home()
+            # check if the player can move from bar with first dice 
+            if game.board[opponent_home[game.dice[0]]].team != game.opponent.team or game.board[opponent_home[game.dice[0]]].team == game.opponent.team and game.board[opponent_home[game.dice[0]]].count <= 1:
+                all_moves.append([0, game.opponent.get_home()[game.dice[0]], game.dice[0]])
+
+            # check to see if there is another dice and if there is check if it is a valid move 
+            if len(game.dice) > 1 and game.dice[0] != game.dice[1]:
+                if game.board[opponent_home[game.dice[1]]].team != game.opponent.team or game.board[opponent_home[game.dice[1]]].team == game.opponent.team and game.board[opponent_home[game.dice[1]]].count <= 1:
+                    all_moves.append([0, game.opponent.get_home()[game.dice[1]], game.dice[1]])
+
+            return all_moves
+
+        # get all moves available on board 
+        fromPoints = [index for index in range(1, BOARD_SIZE + 1) if game.board[index].team == game.currentPlayer.team]
+
+        # sentinel to track how dice checks
+        check = 1
+        while check:
+            # for each point in the list 
+            for point in fromPoints:
+                toPoint = point - game.dice[0] * game.currentPlayer.team
+                # change To point to 25 if the dice moves the player to the goal 
+                if toPoint <= 0 or toPoint >= 25:
+                    toPoint = 25
+                game.update_move(point, toPoint)
+                # if the move is valid add the move to the all moves list 
+                if game.check_move():
+                    all_moves.append([point, toPoint, game.dice[0]])
+                    continue
+
+            # once we have iterated through all possible from positions using dice one, if there is only one dice or they are doubles, exit while loop
+            if len(game.dice) == 1 or len(game.dice) > 2 or game.dice[0] == game.dice[1]:
+                break
+            else:
+                if check == 1:
+                    check += 1
+                    game.swap_dice()
+                else:
+                    #swap dice back and break from while loop
+                    game.swap_dice()
+                    break
+
+        game.message = ''
+        return all_moves
+
+    # function to calculate risk of moving to a point, risk is 0 unless the move will result in a blot, risk is calculated by adding the probability of opponent rolling the value to move from any of their points to hit on the blot 
+    def get_risk(self, game, moves):
+
+        def check_opponent_from_points(blot_point):
+            # create accumulator for risk total 
+            riskTotal = 0
+
+            # for opponent's possible moves 
+            for oMove in opponentMoves:
+                # if the opponent is bearing off have to adjust distance calculation 
+                if (oMove == 0 or game.board[blot_point].team == game.opponent) and blot_point in game.currentPlayer.get_home():
+                    riskTotal += point_distance_prob[game.currentPlayer.get_home().index(blot_point)]
+                # otherwise find distance [(from point - to point) * opponent's  team], if it is less than 0 there is no possibility for opponent to move to that point continue, otherwise add risk to accumulator
+                else:
+                    distance = (oMove - blot_point) * game.opponent.team
+                    if distance > 0 and distance in point_distance_prob:
+                        riskTotal += point_distance_prob[distance]
+
+            return riskTotal
+
+        # list of risk values (float)
+        blotRisk = []
+
+        # get list of all possible from points for opponent (since dice roll is random, must consider every from point), check for bar 
+        opponentMoves = []
+        if game.opponent.bar:
+            opponentMoves.append(0)
+        else:
+            opponentMoves = [index for index in range(1, BOARD_SIZE + 1) if game.board[index].team == game.opponent.team]
+
+        # for all of the current player's moves
+        for cMove in moves:
+            # reset From blotting to False and accumulator 
+            blotAtFrom = False
+            riskTotal = 0
+
+            # check if the player is blotting at from point 
+            if cMove[0] != 0 and game.board[cMove[0]].count == 2:
+                blotAtFrom = True
+
+            # if the player is bearing off, check if player is blotting at From point and add risk to list 
+            if cMove[1] == 25:
+                if blotAtFrom:
+                    riskTotal += check_opponent_from_points(cMove[0])
+                blotRisk.append(round(riskTotal, 3))
+            # if the To point is occupied by current player check if the player is blotting at From point and add risk to list 
+            elif game.board[cMove[1]].team == game.currentPlayer.team:
+                if blotAtFrom:
+                    riskTotal += check_opponent_from_points(cMove[0])
+                blotRisk.append(round(riskTotal, 3))
+            # otherwise check the player's to and from points 
+            else:
+                riskTotal += check_opponent_from_points(cMove[1])
+                if blotAtFrom:
+                    riskTotal += check_opponent_from_points(cMove[0])
+                
+                    # add risk total for that To point to blotRisk list 
+                blotRisk.append(round(riskTotal, 3))
+
+        # return list
+        return blotRisk
+
+    # this function will evaluate the player's turn, to a maximum depth of two moves, considering all possible moves and returning the optimal move, the function considers what the player can do next after making the first move by recursively calling the function  
+    def maximize_turn(self, game, depth):
+       
+        alpha = -math.inf
+        max_score = -math.inf
+
+        moves = self.get_all_moves(game)
+        for move in moves:
+            print(f'\nMAXIMIZE TURN\nChecking move: {move[0]}, {move[1]}, {move[2]}\n\n')
+            game.update_dice(move[2])
+            game.update_move(move[0], move[1])
+            game.make_move()
+
+            # have to check for special case where a) depth = 2 but the player only has one move left (i.e. final piece to bear off) or b) the player's first move negates the second move, in either case a call to score_turn will return -inf and the function will not load any moves to best_move_sequence 
+            if depth == 2 and len(self.get_all_moves(game)) == 0:
+                # call utility function to evaluate value of first move 
+                score = self.utility(game)
+                # if this move has a better score clear the best_move_sequence 
+                if max_score < score:
+                    self.best_move_sequence.clear()
+            # otherwise call score function 
+            else:
+                score = self.score_turn(game, depth - 1, alpha)
+
+           # if the score for the current sequence of moves is better than the previous, update max_score, insert move into stack
+            print(f'If {max_score} is less than {score}') 
+            if max_score < score:
+                print(f'Append to best move sequence')
+                max_score = alpha = score
+                self.best_move_sequence.append(move)
+
+            print(f'\nMAXIMIZE TURN\nUndo Move\n\n')
+            print(f'Best move sequence: {len(self.best_move_sequence)}')
+            game.undo_move()
+
+    def score_turn(self, game, depth, alpha):
+        if depth == 0:
+            return self.utility(game)
+
+        max_score = alpha
+
+        moves = self.get_all_moves(game)
+        for move in moves:
+            print(f'\SCORE TURN\nChecking move: {move[0]}, {move[1]}, {move[2]}\n\n')
+            game.update_dice(move[2])
+            game.update_move(move[0], move[1])
+            game.make_move()
+
+            score = self.score_turn(game, depth - 1, alpha)
+
+            # if the score for the current sequence of moves is better than the previous, update max_score, insert move into stack 
+            if max_score < score:
+                max_score = score
+                # if there is already a sequence of moves in the stack it has to be cleared 
+                if len(self.best_move_sequence) >= depth:
+                    self.best_move_sequence.clear()
+                self.best_move_sequence.append(move)
+
+            print(f'\nSCORE TURN\nUndo Move\n\n')
+            game.undo_move()
+
+        # assign max_score to alpha, which will keep track of the maximum score for the previous iterations through the first moves 
+        alpha = max_score
+        return alpha
+
+    def utility(self, game):
+        # evaluate player's position on board 
+
+        # how many pips do they control (i.e. 2 or more pieces on pip)
+        cPips = [index for index in range(1, BOARD_SIZE + 1) if game.board[index].team == game.currentPlayer.team and game.board[index].count >= 2]
+
+        # how many pieces are in the goal 
+        cGoal = game.currentPlayer.goal
+
+        # how many opponent pieces are on the bar 
+        oBar = game.opponent.bar
+
+        # how many blots 
+        cBlots = [index for index in range(1, BOARD_SIZE + 1) if game.board[index].team == game.currentPlayer.team and game.board[index].count == 1]
+
+        # calculate total score by weighing each factor 
+        score = len(cPips) + cGoal + oBar - len(cBlots)
+        print(f'UTILITY\n{score}\n')
+        return score
+
+# bot class for default version 
+class default_bot(salami_bot):
+    def __init__(self, name, team):
+        super().__init__(name, team)
+
+    def find_best_move(self, game):
+        # get all moves for bot, moves is a 2d list[[from, to, dice], ]
+        moves = self.get_all_moves(game)
+        
+        # choose random move
+        move = random.randint(0, len(moves) - 1)
+        return moves[move]
+
+# Point object to represent each point on the board, 24 points are stored in an array, so they can be indexed, index represents their position on the board, each point has two attributes, team to correspond to player one (1) or player two (-1) and count which represents the number of pieces on that point 
+class Point(object):
+    def __init__(self, team, count):
+        self.team = team
+        self.count = count
+
+    # fxn to reset the point 
+    def reset(self):
+        self.team = 0
+        self.count = 0
+
+    # fxn to remove piece from point 
+    def remove_piece(self):
+        self.count -= 1
+        if self.count == 0:
+            self.team = 0
+
+    # fxn to add piece to point 
+    def add_piece(self, team):
+        self.count += 1
+        if self.count == 1:
+            self.team = team
+
+class Controller(object):
+    """description of class"""
+    # initialize current player to player 1, opponent to player 2, empty move, empty message, empty dice, empty board, call new game fxn 
+    def __init__(self):
+        self.mode = 0
+        self.currentPlayer = None
+        self.opponent = None
+        self.move = [0, 0]
+        self.message = ''
+        self.dice = []
+        self.board = []
+        self.new_game()
+        self.moveStack = []
+
+    def debugger(self):
+        print(f"\n\ncurrent player: {self.currentPlayer.get_team()}")
+
+        print(f"opponent player: {self.opponent.get_team()}")
+        print(f"current moves: {self.move[0]} and {self.move[1]}")
+        print(f"message: {self.message}")
+        for i, val in enumerate(self.dice):
+            print(f"dice {i+1}: {val}")
+
+    # new game fxn, fills board with empty point objects 
+    def new_game(self):
+        # initialize board with Point objects
+        self.board = []
+        self.board = [Point(0, 0) for i in range(25)]
+
+        # reset game attributes 
+        self.mode = 0
+        self.currentPlayer = None
+        self.opponent = None
+        self.move = [0, 0]
+        self.message = ''
+        self.dice = []
+        
+        # assigns starting points with their team and count 
+        self.board[0] = None
+        self.board[1] = Point(-1, 2)
+        self.board[12] = Point(-1, 5)
+        self.board[17] = Point(-1, 3)
+        self.board[19] = Point(-1, 5)
+
+        self.board[24] = Point(1, 2)
+        self.board[13] = Point(1, 5)
+        self.board[8] = Point(1, 3)
+        self.board[6] = Point(1, 5)
+    
+    def printBoard(self):
+        print('===========================================================================')
+
+        # Show current dice (moves)
+        id = 1
+        for dice in self.dice:
+            print(f'Dice {id}: {dice}')
+            id += 1
+
+        tempBoardTop = ''
+        tempBoardBottom = ''
+        count = 0
+
+        for index in range(13, BOARD_SIZE + 1):
+            if count == 6:
+                tempBoardTop += '| | '
+                tempBoardBottom += '| | '
+            if self.board[index].team == 1:
+                team = ''
+            elif self.board[index].team == -1:
+                team = '-'
+            else:
+                team = ''
+            if self.board[25 - index].team == 1:
+                team2 = ''
+            elif self.board[25 - index].team == -1:
+                team2 = '-'
+            else:
+                team2 = ''
+            tempBoardTop += '( ' + team + str(self.board[index].count) + ') '
+            tempBoardBottom += '( ' + team2 + str(self.board[25 - index].count) + ') '
+            count += 1
+
+        print(f'\n {tempBoardTop}\n')
+        print(f'{tempBoardBottom}\n')
+        print(f'{self.currentPlayer.get_team()} bar: {self.currentPlayer.bar}')
+        print(f'{self.opponent.get_team()} bar: {self.opponent.bar}')
+
+        print(f'\n{self.currentPlayer.get_team()} goal: {self.currentPlayer.goal}')
+        print(f'{self.opponent.get_team()} goal: {self.opponent.goal}')
+        print('===========================================================================')
+
+    # dice functions 
+    # Roll dice function, adds two more dice of the same value if doubles are rolled
+    def roll_dice(self):
+        self.dice.append(random.randint(1,6))
+        self.dice.append(random.randint(1,6))
+        if self.dice[0] == self.dice[1]:
+            self.dice.append(self.dice[0])
+            self.dice.append(self.dice[0])
+
+    # Swap function, swaps dice for player
+    def swap_dice(self):
+        if len(self.dice) > 2 or len(self.dice) == 1:
+            return
+        temp = self.dice[1]
+        self.dice[1] = self.dice[0]
+        self.dice[0] = temp
+
+    # If the bot is not using dice[0] to make its move, the dice needs to be removed and inserted back into 0 position, all controller functions assume dice[0] is being used 
+    def update_dice(self, dice):
+        if self.dice[0] != dice:
+            self.dice.remove(dice)
+            self.dice.insert(0, dice)
+
+    # game controller functions 
+    # updates dice with player's move 
+    def isGameOver(self):
+        return self.currentPlayer.goal == NUM_PIECES or self.opponent.goal == NUM_PIECES
+
+    def getWinner(self):
+        if self.currentPlayer == NUM_PIECES:
+            return self.currentPlayer.name
+        else:
+            return self.opponent.name
+
+    def update_move(self, fromPoint, toPoint):
+        # check if the function is being called from collision point check loop
+        if fromPoint == 25 or fromPoint == 26:
+            self.move[0] = 0
+        else:
+            self.move[0] = fromPoint
+        # check if the function is being called from collision point check loop
+        if toPoint == 100:
+            # if the player is bearing off the to point will be the dice value corresponding to opponent's home 
+            if self.move[0] == 0:
+                self.move[1] = self.opponent.get_home()[self.dice[0]]
+            # if the player is trying to bear off 
+            elif fromPoint - self.dice[0] * self.currentPlayer.team > 24 or fromPoint - self.dice[0] * self.currentPlayer.team < 1:
+                self.move[1] = 25
+            else:
+                self.move[1] = fromPoint - self.dice[0] * self.currentPlayer.team
+        else:
+            self.move[1] = toPoint
+
+    # switch players after turn is over 
+    def switch_players(self):
+        temp = self.currentPlayer
+        self.currentPlayer = self.opponent
+        self.opponent = temp
+
+    # returns if the player can bear off 
+    def can_bear_off(self):
+        # count all the pieces in the player's home 
+        total = 0
+        for i in self.currentPlayer.get_home():
+            if i == 0:
+                continue
+            if self.board[i].team == self.currentPlayer.team:
+                total += self.board[i].count
+        if not self.currentPlayer.goal:
+            return total == NUM_PIECES
+        else:
+            totalCount = total + self.currentPlayer.goal
+            return totalCount == NUM_PIECES
+
+    # returns if the player hit on their move 
+    def check_hit(self):
+        if self.board[self.move[1]].team == self.opponent.team and self.board[self.move[1]].count == 1:
+            return True
+
+    def check_move(self, fromPoint = 0, toPoint = 0):
+        # check if different From and To points were provided 
+        if fromPoint == 0 and toPoint == 0:
+            fromPoint = self.move[0]
+            toPoint = self.move[1]
+
+        # if the player has barred pieces but didn't try to move them 
+        if fromPoint != 0 and self.currentPlayer.bar:
+            self.message = ' has at least one barred piece'
+            return False 
+
+        # if the player doesn't have barred pieces but tried to move them 
+        if fromPoint == 0 and not self.currentPlayer.bar:
+            self.message = ' does not have any barred pieces'
+            return False
+
+        # if the player is trying to bear off but can't
+        if toPoint == 25 and not self.can_bear_off():
+            self.message = ' cannot bear off'
+            return False
+
+        # final check to move from bar
+        if fromPoint == 0:
+            # have to check the position they are moving to is not occupied
+                # by the opponent 
+            # have to check the dice rolled allow that move 
+            if self.board[toPoint].team == self.opponent.team and self.board[toPoint].count > 1:
+                self.message = f' cannot move from bar to point {toPoint}. There are too many opponent piece there'
+                return False
+            elif toPoint not in self.opponent.get_home() or self.opponent.get_home().index(toPoint) != self.dice[0]:
+                self.message = f' cannot move from bar to point {toPoint} with dice'
+                return False
+            else:
+                return True
+            
+        # final check to bear off 
+        if toPoint == 25:
+            # if the player does not have pieces at from point 
+            if self.board[fromPoint].team != self.currentPlayer.team:
+                self.message = f' cannot bear off, does not have any pieces at point {fromPoint}'
+                return False
+            # if the dice does not allow it 
+            elif self.currentPlayer.get_home().index(fromPoint) > self.dice[0]:
+                self.message = ' cannot bear off, piece is too far from home'
+                return False
+            # if the dice allows it, but there are pieces in higher positions still
+            elif self.currentPlayer.get_home().index(fromPoint) < self.dice[0]:
+                for otherFromPoint in reversed(self.currentPlayer.get_home()):
+                    if fromPoint == otherFromPoint:
+                        return True
+                    if self.board[otherFromPoint].team == self.currentPlayer.team:
+                        self.message = ' cannot bear off, there are pieces in higher positions'
+                        return False
+            # else player can bear off
+            else:
+                return True
+        # check for player making a regular move 
+        # check the player has a piece at from point, the player is not moving backwards and the dice rolled allow move, and there isn't more than one opponent piece at the to point
+        if self.board[fromPoint].team != self.currentPlayer.team:
+            self.message = f' cannot move from point {fromPoint} to point {toPoint}. You have no pieces there'
+            return False
+        elif fromPoint - toPoint != self.dice[0] * self.currentPlayer.team:
+            self.message = f' cannot move from point {fromPoint} to point {toPoint} using dice one'
+            return False
+        elif self.board[toPoint].team == self.opponent.team and self.board[toPoint].count > 1:
+            self.message = f' cannot move from point {fromPoint} to point {toPoint}. There are too many opponent pieces there'
+            return False
+        else:
+            return True
+
+    # function to undo move on board by popping most recent move added to moveStack 
+    def undo_move(self):
+        self.message = ''
+
+        # team, From point, To point, dice, hit 
+        move = self.moveStack.pop()
+
+        # get current and opponent player 
+        cTeam = move[0]
+        oTeam = 1 if move[0] == -1 else -1 
+
+        # check if the move was bearing off 
+        if move[2] == 25:
+            # remove piece from player's goal 
+            if self.currentPlayer.team == cTeam:
+                self.currentPlayer.goal -= 1
+            else:
+                self.opponent.goal -= 1
+            # add piece back to from point
+            self.board[move[1]].add_piece(cTeam)
+        # if the player is moving from bar or making a normal move
+        else:
+            # check if the player was moving from the bar 
+            if move[1] == 0:
+                # add piece back to bar 
+                if self.currentPlayer.team == cTeam:
+                    self.currentPlayer.bar += 1
+                else:
+                    self.opponent.bar += 1
+                # remove piece from To point 
+                self.board[move[2]].remove_piece()
+            # otherwise normal move 
+            else:
+                # add piece back to From point 
+                self.board[move[1]].add_piece(move[0])
+
+                # remove piece from To point
+                self.board[move[2]].remove_piece()
+
+            # check if there was a hit at the To point 
+            if move[4]:
+                # if there was a hit need to add opponent piece at point 
+                self.board[move[2]].add_piece(oTeam)
+                # remove piece from opponent's bar 
+                if self.currentPlayer.team == cTeam:
+                    self.opponent.bar -= 1
+                else:
+                    self.currentPlayer.bar -= 1
+
+        # add dice back to list of dice 
+        self.dice.insert(0, move[3])
+
+    # function to make move on board 
+    def make_move(self):
+        self.message = ''
+
+        # assign From point and To point variables
+        fromPoint = self.move[0]
+        toPoint = self.move[1]
+        hit = False
+
+        # if the player is bearing off, do not need to check for hit before making move
+        if toPoint == 25:
+            self.currentPlayer.goal += 1
+            self.board[fromPoint].remove_piece()
+            self.message = f' beared off from point {fromPoint}' 
+        # if the player is moving from bar or making a normal move, first check for hit 
+        else:
+            if self.check_hit():
+                hit = True
+                self.opponent.bar += 1
+                self.board[toPoint].reset()
+                self.message = f' hit at point {toPoint}.'
+
+            # if player is moving from bar 
+            if fromPoint == 0:
+                self.currentPlayer.bar -= 1
+                self.board[toPoint].add_piece(self.currentPlayer.team)
+                self.message += f' Moved from bar to point {toPoint} '
+            # otherwise make regular move 
+            else:
+                self.board[fromPoint].remove_piece()
+                self.board[toPoint].add_piece(self.currentPlayer.team)
+                self.message += f' Moved from point {fromPoint} to point {toPoint}'
+
+        # add move to the stack 
+        self.moveStack.append([self.currentPlayer.team, fromPoint, toPoint, self.dice[0], hit])
+
+        # remove dice being used 
+        self.dice.pop(0)
+
+    # adjust dice based on available moves, does not return a value, but will clear the list of dice (moves) if there are no available moves, effectively ending the players turn 
+    def adjust_dice(self):
+        # check if the player has pieces on the bar 
+        if self.currentPlayer.bar:
+            # if the player has pieces on the bar, check if dice one allows player to move their piece from bar to position on board allowed by the dice 
+            opponent_home = self.opponent.get_home()
+            if self.board[opponent_home[self.dice[0]]].team == self.opponent.team and self.board[opponent_home[self.dice[0]]].count > 1:
+                # if there is only one dice or the dice is doubles
+                if len(self.dice) == 1 or len(self.dice) > 2:
+                    self.message = f' only has one move: {self.dice[0]} this is not a valid move. Voiding turn'
+                    self.dice.clear()
+                    return
+                # else if the player cannot move from the bar with their second dice
+                elif self.board[opponent_home[self.dice[1]]].team == self.opponent.team and self.board[opponent_home[self.dice[1]]].count > 1:
+                    self.message = f' has no valid moves, dice one: {self.dice[0]}, dice two: {self.dice[1]}. Voiding turn'
+                    self.dice.clear()
+                    return
+                # else the player will have to use the second dice first 
+                else:
+                    self.swap_dice()
+                    return 
+            # else the player can move with their first dice 
+            else:
+                return
+
+        # check if the player has any valid moves on the board 
+        check = 1
+
+        # find all points current player can move from 
+        fromPoints = [index for index in range(1, BOARD_SIZE + 1) if self.board[index].team == self.currentPlayer.team]
+
+        while check:
+            # for each point in the list 
+            for point in fromPoints:
+                toPoint = point - self.dice[0] * self.currentPlayer.team
+                # change To point to 25 if the dice moves the player to the goal 
+                if toPoint <= 0 or toPoint >= 25:
+                    toPoint = 25
+                self.update_move(point, toPoint)
+                # if the move is valid add the move to the all moves list 
+                if self.check_move():
+                    self.message = ''
+                    return
+
+            # if we didn't return there were no valid moves using dice one, if there is only one dice or they are doubles, void turn 
+            if len(self.dice) == 1 or len(self.dice) > 2 or self.dice[0] == self.dice[1]:
+                self.message = f' only has one move: {self.dice[0]}, this is not a valid move. Voiding turn'
+                self.dice.clear()
+                return
+            else:
+                if check == 1:
+                    check += 1
+                    self.swap_dice()
+                else:
+                    self.message = f' has no valid moves, dice one: {self.dice[0]}, dice two: {self.dice[1]}. Voiding turn'
+                    self.dice.clear()
+                    return
+
+class gameBoard(object):
+    def __init__(self):
+        pygame.init()
+        self.width = pygame.display.Info().current_w
+        self.height = pygame.display.Info().current_h
+
+        # screen for game
+        self.screen = pygame.display.set_mode((self.width,self.height))
+        pygame.display.set_caption("Backgammon")
+
+        # initialize board image 
+        self.board_image = pygame.image.load("boardV2.jpg")
+        self.board_image = pygame.transform.scale(self.board_image, (self.width, self.height))    
+        
+        self.point_coords = {1: (1324, 880), 2: (1220, 880), 3: (1118, 880), 4: (1016, 880), 5: (914, 880), 6: (812, 880), 7: (641, 880), 8: (539, 880), 9: (437, 880), 10: (335, 880), 11: (233, 880), 12: (131, 880), 13: (131,10), 14: (233, 10), 15: (335, 10), 16: (437, 10), 17: (539, 10), 18: (641, 10), 19: (812, 10), 20: (914, 10), 21: (1016, 10), 22: (1118, 10), 23: (1220, 10), 24: (1324, 10), 25: (727, 400), 26: (727, 500), 27: (1436, 28), 28: (1436, 860), 29: (756, 425), 30: (756, 525)}
+        self.all_pieces = pygame.sprite.Group()
+        self.smallFont = pygame.font.SysFont(None, 25)
+        self.collisionCheck = []
+
+    def draw_text(self, info):
+        # create white box to display info
+        box = pygame.Surface((500, 300))
+        box.fill((255, 255, 255))  # fill with white color
+        box_rect = box.get_rect(center=(self.width/2, self.height/2))
+
+        # split text into separate lines 
+        words = info.split()
+        renderList = []
+        tempStr = ''
+        for word in words:
+            if has_punctuation(word):
+                tempStr += word
+                tempObj = self.smallFont.render(tempStr, True, (0, 0, 0))
+                renderList.append(tempObj)
+                tempStr = ''
+                continue
+            tempStr += word + ' '
+        tempObj = self.smallFont.render(tempStr, True, (0, 0, 0))
+        renderList.append(tempObj)
+        
+        # blit background and box 
+        self.screen.blit(self.board_image, (0, 0))
+        self.screen.blit(box, box_rect)
+
+        for i, sentence in enumerate(renderList):
+            sentence_rect = sentence.get_rect()
+            sentence_rect.center = box_rect.center
+            sentence_rect.move_ip(0, 20 * i - 100)
+            self.screen.blit(sentence, sentence_rect)
+            
+        pygame.display.flip()
+
+    def draw_screen(self, game):
+        print("\n~~~~~~~~~~~~~~~~\n")
+        game.debugger()
+        # clear group of pieces
+        self.all_pieces.empty()
+
+        # get which player is white and black 
+        if game.currentPlayer.team == 1:
+            p1 = game.currentPlayer
+            p2 = game.opponent
+        else:
+            p1 = game.opponent
+            p2 = game.currentPlayer
+
+        # get game message and player's turn 
+        self.draw_turn(game)
+
+        # iterate through board and create sprite for each piece on board and an underlying rect object to check for collisions when the player has to enter their move 
+        for point in range(1, 25):
+            # draw underlying rect and add to list to check for collisions 
+            width = 70
+            height = 70
+            rect = pygame.Rect(self.point_coords[point][0], self.point_coords[point][1], width, height)
+            self.collisionCheck.append(rect)
+
+            # draw pieces on board 
+            if game.board[point].team != 0:
+                for eachPiece in range(game.board[point].count):
+                    coords = list(self.point_coords[point])
+                    if point >= 13:
+                        coords[1] += eachPiece * 40
+                    else:
+                        coords[1] -= eachPiece * 40
+                    piece = Piece(game.board[point].team, coords)
+                    self.all_pieces.add(piece)
+        # need to add two rect objects for the bar positions and the dice 
+        rect = pygame.Rect(727, 400, 70, 70)
+        self.collisionCheck.append(rect)
+        rect = pygame.Rect(727, 500, 70, 70)
+        self.collisionCheck.append(rect)
+        rect = pygame.Rect(914, 450, 50, 50)
+        self.collisionCheck.append(rect)
+
+        # create sprite for pieces on bar 
+        if p1.bar:
+            piece = Piece(p1.team, self.point_coords[25])
+            self.all_pieces.add(piece)     
+            text = gameText(p1.bar, self.point_coords[29], 30)
+            self.all_pieces.add(text)
+        if p2.bar:
+            piece = Piece(p2.team, self.point_coords[26])
+            self.all_pieces.add(piece)
+            text = gameText(p2.bar, self.point_coords[30], 30, (255, 255, 255))
+            self.all_pieces.add(text)
+
+        # create sprite for pieces in goal 
+        if p1.goal:
+            for piece in range(p1.goal):
+                coords = list(self.point_coords[28])
+                coords[1] -= piece * 25
+                piece = Piece(p1.team, coords)
+                self.all_pieces.add(piece)
+        if p2.goal:
+            for piece in range(p2.goal):
+                coords = list(self.point_coords[27])
+                coords[1] += piece * 25
+                piece = Piece(p2.team, coords)
+                self.all_pieces.add(piece)
+
+        # draw underlying rect objects and draw board background on top 
+        for obj in self.collisionCheck:
+            pygame.draw.rect(self.screen, (0, 0, 0), obj, 3)
+        self.screen.blit(self.board_image, (0, 0))
+
+        # draw dice 
+        font = pygame.font.SysFont(None, 45, True)
+        boX = 914
+        boY = 450
+        for move in game.dice:
+            box = pygame.Surface((50, 50))
+            box.fill((255, 255, 255))  # fill with white color
+            box_rect = box.get_rect()
+                
+            text = font.render(str(move), True, (0, 0, 0))
+            self.screen.blit(box, (boX, boY))
+            self.screen.blit(text, (boX + 15, boY + 14))
+            rect = pygame.Rect(boX, boY, 50, 50)
+            pygame.draw.rect(self.screen, (0, 0, 0), rect, 4)
+            boX += 100
+
+        # draw all pieces
+        self.all_pieces.draw(self.screen)
+        pygame.display.flip()
+
+    def get_name(self, player):
+        # create white box to display info
+        box = pygame.Surface((500, 300))
+        box.fill((255, 255, 255))  # fill with white color
+        box_rect = box.get_rect(center=(self.width/2, self.height/2))
+
+        # set up the text input
+        input_box = pygame.Rect(0, 0, 140, 32)
+        input_box.center = box_rect.center
+        text = ''
+        active = False
+        color = pygame.Color('lightskyblue3')
+
+        # loop to get player name
+        done = False
+        while not done:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit() 
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if input_box.collidepoint(event.pos):
+                        # toggle the active variable
+                        active = not active
+                    else:
+                        active = False
+                    # change the current color of the input box
+                    color = pygame.Color('dodgerblue2') if active else pygame.Color('lightskyblue3')
+                if event.type == pygame.KEYDOWN:
+                    if active:
+                        if event.key == pygame.K_RETURN:
+                            # store the entered name and exit the loop
+                            done = True
+                        elif event.key == pygame.K_BACKSPACE:
+                            text = text[:-1]
+                        else:
+                            text += event.unicode
+
+            # render the white background box
+            self.screen.blit(box, box_rect)
+            # render the text to tell user to enter name 
+            font = pygame.font.SysFont(None, 30, True)
+            instruction = font.render(player + " player name: ", True, (0, 0, 0), )
+            instruct_rect = instruction.get_rect()
+            instruct_rect.center = box_rect.center
+            instruct_rect.move_ip(0, -50)
+            self.screen.blit(instruction, instruct_rect)
+            # render input box 
+            pygame.draw.rect(self.screen, color, input_box)
+            txt_surface = self.smallFont.render(text, True, (0, 0, 0))
+            self.screen.blit(txt_surface, (input_box.x + 5, input_box.y + 5))
+            
+            pygame.display.flip()
+
+        return text
+
+    # intro function to display introduction information and set game.mode, game.opponent, and game.currentPlayer
+    def intro(self, game):
+        # create text to display
+        message = 'Welcome to the wonderful game of Backgammon! Press enter to continue'
+
+        # call function to display text 
+        self.draw_text(message)
+
+        # create loop to display intro text until user presses enter 
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN:
+                        running = False
+
+        # get gamemode
+        message = 'Please select gamemode: Enter 1 for Two player. Enter 2 for One player.'
+        self.draw_text(message)
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                elif event.type == pygame.KEYDOWN:
+                    if event.unicode == '1':
+                        game.mode = 1
+                        running = False
+                    elif event.unicode == '2':
+                        game.mode = 2
+                        running = False
+
+        # return user's selection
+        message = 'One player selected. Press enter to continue' if game.mode == 2 else 'Two player selected. Press enter to continue'
+        self.draw_text(message)
+        # create loop to display text until user presses enter 
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN:
+                        running = False
+
+        # create players 
+        # if the user chose one player 
+        if game.mode == 2:
+            pTwo = salami_bot('Salami Bot', -1)
+            pOneName = self.get_name("White")
+            pOne = Player(pOneName, 1)
+        # if the user chose two player 
+        else:
+            pOneName = self.get_name("White")
+            pOne = Player(pOneName, 1)
+            pTwoName = self.get_name("Black")
+            pTwo = Player(pTwoName, -1)
+
+        # get who moves first
+        game.roll_dice()
+        if game.dice[0] >= game.dice[1]:
+            message = "White moves first"
+            messageObj = gameText(message, (0,0), 15)
+            game.currentPlayer = pOne
+            game.opponent = pTwo
+        else:
+            message = "Black moves first"
+            messageObj = gameText(message, (0,0), 15)
+            game.currentPlayer = pTwo
+            game.opponent = pOne
+        game.dice.clear()
+
+        # draw images to screen
+        self.screen.blit(self.board_image, (0, 0))
+        self.all_pieces.draw(self.screen)
+        pygame.display.flip()
+
+    def draw_turn(self, game):
+        yCoord = 440
+        if game.message:
+            # if there is a game message check if the text is too long for one line (we know there will be two lines max)
+            words = game.message.split()
+            renderList = []
+            tempStr = ' '
+            for word in words:
+                if '.' in word:
+                    tempStr += word
+                    renderList.append(tempStr)
+                    tempStr = ''
+                    continue
+                tempStr += word + ' '
+            renderList.append(tempStr)
+
+            if len(renderList) > 1:
+                message = gameText(renderList[1], (133, yCoord), 30)
+                yCoord -= 40
+                self.all_pieces.add(message)
+            message = gameText(game.currentPlayer.get_name() + renderList[0], (133, yCoord), 30)
+            self.all_pieces.add(message)
+        tempTurn = game.currentPlayer.get_name() + "\'s turn"
+        turn = gameText(tempTurn, (133, 480), 45, (0, 0, 0), True)
+        self.all_pieces.add(turn)
+
+
+
+def regular():
+    # create instance of controller to run game and gameBoard to display game
+    board = gameBoard()
+    game = Controller()
+
+    # call intro function to get game mode and create players
+    board.intro(game)
+
+    # while the game is not over keep switching players 
+    while not game.isGameOver():
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+        # roll the dice
+        game.roll_dice()
+
+        # adjust dice 
+        game.adjust_dice()
+
+        # print board 
+        board.draw_screen(game)
+
+        # while there is still a move available and the game is not over 
+        while len(game.dice) > 0 and not game.isGameOver():
+            # if it is two player mode or it is one player mode and the current player is the user 
+            if game.mode == 1 or game.mode == 2 and game.currentPlayer.team == 1:
+                # while the player still needs to enter a valid move 
+                running = True
+                while running:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            pygame.quit()
+                            sys.exit()
+                        elif event.type == pygame.MOUSEBUTTONDOWN:
+                            if event.button == 1:
+                                pos = pygame.mouse.get_pos()
+                                # iterate through collision objects to check player's click
+                                for point, obj in enumerate(board.collisionCheck):
+                                    # if there is a collision 
+                                    if obj.collidepoint(pos):
+                                        # check if the player clicked the dice to switch the order 
+                                        if point == 26:
+                                            game.swap_dice()
+                                            board.draw_screen(game)
+                                            break
+                                        # update the move, using 100 as a sentinel to tell the function to figure out where the player is trying to go 
+                                        game.update_move(point + 1, 100)
+                                        # if the move is valid 
+                                        if game.check_move():
+                                            # make the move and remove the dice that was used 
+                                            game.make_move()
+                                            # redraw screen 
+                                            board.draw_screen(game)
+                                            game.message = ''
+                                            # switch sentinel
+                                            running = False
+                                            # adjust dice 
+                                            if len(game.dice) != 0:
+                                                game.adjust_dice()
+                                            # break out of loop 
+                                            break 
+                                        # if the move was not valid, redraw board with error message, break out of collide point check loop, player needs to enter another move 
+                                        board.draw_screen(game)
+                                        game.message = ''
+                                        break 
+            # else it is one player and it is the bot's turn 
+            else:
+                # slow the game so player can see computer's moves
+                sleep(2)
+
+                # calls bot functions to find move
+                game.currentPlayer.turn(game)
+
+                # make move and remove the dice used to make that move 
+                game.make_move()
+
+                # print board and reset game message 
+                board.draw_screen(game)
+                game.message = ''
+
+                # slow the game so player can see computer's moves
+                sleep(1)
+
+                if len(game.dice) != 0:
+                    game.adjust_dice()
+
+        # Display result of player's turn if adjustDice found there is no available moves for player 
+        if len(game.message) > 0 and not game.isGameOver():
+            board.draw_screen(game)
+            game.message = ''
+        sleep(2)
+
+        # Switch players 
+        game.switch_players()
+
+    # Display winner
+    board.draw_text(game.getWinner() + ' is the winner!')
+    sleep(5)
+
+def testing(iters):
+    # visualize game
+    #board = gameBoard()
+
+    # create dic to hold wins
+    player_wins = {
+        'Smarty Pance' : 0,
+        'Dumbo' : 0}
+
+    # create instance of game controller 
+    game = Controller()
+
+    for i in range(iters):
+        # reset game 
+        game.new_game()
+
+        # create two bots to play
+        players = [1, -1]
+        whiteOrBlack = random.choice(players)
+        p1 = salami_bot('Smarty Pance', whiteOrBlack)
+        players.remove(whiteOrBlack)
+        p2 = default_bot('Dumbo', players[0])
+
+        # set player one and player two 
+        if players[0] == 1:
+            game.currentPlayer = p2
+            game.opponent = p1
+        else:
+            game.currentPlayer = p1
+            game.opponent = p2
+
+        # while the game is not over keep switching players 
+        while not game.isGameOver():
+
+            #for event in pygame.event.get():
+            #    if event.type == pygame.QUIT:
+            #        running = False
+
+            # roll the dice
+            game.roll_dice()
+            #board.draw_screen(game)
+
+            # adjust dice 
+            game.adjust_dice()
+
+            # debugging 
+            game.debugger()
+
+            # while there is still a move available and the game is not over 
+            while len(game.dice) > 0 and not game.isGameOver():
+
+                # get move 
+                game.currentPlayer.turn(game)
+
+                # wait for user to press enter 
+                #running = True
+                #while running:
+                #    for event in pygame.event.get():
+                #        if event.type == pygame.QUIT:
+                #            pygame.quit()
+                #            sys.exit()
+                #        elif event.type == pygame.KEYDOWN:
+                #            if event.key == pygame.K_RETURN:
+                #                running = False
+
+                # make move and remove the dice that was used 
+                game.make_move()
+                print(f'{game.message}')
+                game.printBoard()
+                
+                # print board and reset game message 
+                #board.draw_screen(game)
+                #game.message = ''
+
+                # wait for user to press enter 
+                wPieces = sum(game.board[i].count for i in range(1, BOARD_SIZE + 1) if game.board[i].team == 1)
+                bPieces = sum(game.board[i].count for i in range(1, BOARD_SIZE + 1) if game.board[i].team == -1)
+                if game.currentPlayer.team == 1:
+                    wPieces += game.currentPlayer.goal
+                    bPieces += game.opponent.goal
+                else:
+                    bPieces += game.currentPlayer.goal
+                    wPieces += game.opponent.goal
+                if bPieces > NUM_PIECES or wPieces > NUM_PIECES:
+                    print(f'White pieces: {wPieces}\nBlack pieces: {bPieces}')
+                    raise ValueError('Error')
+                    #running = True
+                    #while running:
+                    #    for event in pygame.event.get():
+                    #        if event.type == pygame.QUIT:
+                    #            pygame.quit()
+                    #            sys.exit()
+                    #        elif event.type == pygame.KEYDOWN:
+                    #            if event.key == pygame.K_RETURN:
+                    #                running = False
+
+                if len(game.dice) != 0:
+                    game.adjust_dice()
+
+            # Switch players 
+            game.switch_players()
+
+        # Get winner 
+        winner = game.getWinner()
+        player_wins[winner] += 1
+
+    for p, v in player_wins.items():
+        print(p + ": " + str(v))
+    print(len(game.moveStack))
+
+testing(100)
+#regular()
