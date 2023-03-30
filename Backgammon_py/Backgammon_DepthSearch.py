@@ -11,6 +11,8 @@ V8
 - Moved get_all_moves function to Controller class to improve efficiency 
 - Fixed bug in can_bear_off() function where black could never bear off (negative number of pieces because of board representation never met bearing off criteria) 
 - Removed get_risk() function because it wasn't being used 
+- Added member functions to Player class to manipulate goal and bar attributes, added member function to get_team (int 1 or -1) and get_team_color (string white or black)
+- Added member functions to Controller class to add or remove piece from board 
 '''
 # Constants for game board size and number of pieces
 BOARD_SIZE = 24
